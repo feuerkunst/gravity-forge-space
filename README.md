@@ -6,7 +6,7 @@ https://github.com/user-attachments/assets/5f88f366-6104-488a-b316-73f262a6b10e
 
 
 
-<img width="1243" height="692" alt="Снимок экрана 2026-11-25 094156" src="https://github.com/user-attachments/assets/2a0ce76b-0fe7-4c51-ab7c-4eb50483ee5e" />
+
 
 
 3D N-body симулятор галактик и планетных систем на Python, NumPy и Pygame.
