@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+gravity_*.png
+build/
+dist/
+*.spec
