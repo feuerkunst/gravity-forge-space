@@ -4,44 +4,18 @@ import pygame
 from config import W, H, FOCAL
 from sim.bodies import SPAWN_CATALOG
 from render.camera import world_to_screen
-
-BODY_RU = {
-    "earth": "Земля",
-    "rocky": "Марс",
-    "gas": "Сатурн",
-    "ice": "Нептун",
-    "lava": "Лава",
-    "star": "Звезда",
-    "neutron": "Пульсар",
-    "bh": "Чёрная дыра",
-    "repulsor": "Репульсор",
-}
-
-KIND_RU = {
-    "planet": "Планета",
-    "star": "Звезда",
-    "neutron": "Нейтронная звезда",
-    "bh": "Сингулярность",
-    "repulsor": "Грави-репульсор",
-}
-
-PRESET_RU = {
-    "Spiral Merger": "Слияние спиралей",
-    "Ring Collision": "Кольцевой удар",
-    "Three-Body Chaos": "Хаос трёх тел",
-    "Black Hole Shredder": "Чёрная дыра",
-    "Planetary System": "Планетная система",
-}
+from ui.lang import get_text, body_label, preset_label
 
 
 class HUD:
-    def __init__(self):
+    def __init__(self, lang="ru"):
         self.font = pygame.font.SysFont("segoeui,arial,tahoma", 14)
         self.bold = pygame.font.SysFont("segoeui,arial,tahoma", 14, bold=True)
         self.title_font = pygame.font.SysFont("segoeui,arial,tahoma", 16, bold=True)
         self.small = pygame.font.SysFont("segoeui,arial,tahoma", 12)
         self.meta = pygame.font.SysFont("consolas,segoeui,arial", 13)
 
+        self.lang = lang
         self._surface_cache = {}
         self.toast = ""
         self.toast_end = 0.0
@@ -59,17 +33,25 @@ class HUD:
 
         self.slot_labels = []
         self.slot_rects = []
-        self.dock_rect = self._build_dock()
+        self.dock_rect = pygame.Rect(0, 0, 0, 0)
+        self.hint_surf = None
+        self.set_lang(lang)
 
-        hint = "ЛКМ: камера / фокус   ПКМ: орбита / бросок   [ ]: объекты   -/+: скорость   F: открепить   H: скрыть HUD"
-        self.hint_surf = self.small.render(hint, True, (148, 162, 184))
+    def set_lang(self, lang):
+        self.lang = lang
+        self._surface_cache.clear()
+        self.dock_rect = self._build_dock()
+        t = get_text(self.lang)
+        self.hint_surf = self.small.render(t["hud_hint"], True, (148, 162, 184))
         self.hint_surf.set_alpha(175)
 
     def _build_dock(self):
+        self.slot_labels = []
+        self.slot_rects = []
         gap = 6
         widths = []
         for spec in SPAWN_CATALOG:
-            name = BODY_RU.get(spec["id"], spec["name"])
+            name = body_label(self.lang, spec["id"], spec["name"])
             active_s = self.bold.render(name, True, (245, 250, 255))
             idle_s = self.font.render(name, True, (188, 198, 214))
             self.slot_labels.append((name, active_s, idle_s))
@@ -101,9 +83,6 @@ class HUD:
                 self._surface_cache.clear()
             self._surface_cache[key] = surf
         return surf
-
-    def _draw_text(self, screen, surf, pos):
-        screen.blit(surf, pos)
 
     def notify(self, msg, dur=1.8):
         self.toast = msg
@@ -142,12 +121,13 @@ class HUD:
         return None
 
     def draw_slingshot(self, screen, start_px, cur_px, spawn_spec):
+        t = get_text(self.lang)
         pygame.draw.circle(screen, spawn_spec["atmo"], start_px, 8, 2)
         pygame.draw.line(screen, (235, 242, 255), start_px, cur_px, 2)
         pygame.draw.circle(screen, (245, 248, 255), cur_px, 4)
 
-        name = BODY_RU.get(spawn_spec["id"], spawn_spec["name"])
-        lbl = self.small.render(f"Запуск: {name}", True, (240, 246, 255))
+        name = body_label(self.lang, spawn_spec["id"], spawn_spec["name"])
+        lbl = self.small.render(t["slingshot"].format(name=name), True, (240, 246, 255))
         box = pygame.Rect(start_px[0] + 12, start_px[1] - 26, lbl.get_width() + 16, 22)
         screen.blit(self._glass(box.size, (8, 12, 20, 200), (210, 226, 248, 120), 8), box.topleft)
         screen.blit(lbl, (box.x + 8, box.y + 3))
@@ -181,6 +161,7 @@ class HUD:
         pygame.draw.line(screen, col, (x1, y1), (x1, y1 - arm), 1)
 
     def _draw_card(self, screen, body, locked, mp):
+        t = get_text(self.lang)
         is_bh = body["kind"] == "bh"
         card_h = 196 if is_bh else 174
         self.card_rect.height = card_h
@@ -188,8 +169,8 @@ class HUD:
 
         screen.blit(self._glass(self.card_rect.size, radius=10), self.card_rect.topleft)
 
-        name = BODY_RU.get(body["id"], body["name"])
-        kind_lbl = KIND_RU.get(body["kind"], "Объект")
+        name = body_label(self.lang, body["id"], body["name"])
+        kind_lbl = t["kinds"].get(body["kind"], body["kind"])
 
         cx = self.card_rect.x + 14
         cy = self.card_rect.y + 14
@@ -204,12 +185,12 @@ class HUD:
 
         speed = float(np.linalg.norm(body["vel"]))
         rows = [
-            ("Масса", f"{body['mass']:.1f}"),
-            ("Скорость", f"{speed:.2f} ед/с"),
-            ("Радиус", f"{body['radius']:.2f}"),
+            (t["card_mass"], f"{body['mass']:.1f}"),
+            (t["card_speed"], f"{speed:.2f} {t['card_speed_unit']}"),
+            (t["card_radius"], f"{body['radius']:.2f}"),
         ]
         if is_bh:
-            rows.append(("Поглощено", f"{body['absorbed']:,} звёзд"))
+            rows.append((t["card_absorbed"], f"{body['absorbed']:,} {t['card_absorbed_unit']}"))
 
         ry = div_y + 10
         for label, val in rows:
@@ -223,7 +204,7 @@ class HUD:
             fill = (215, 232, 255, 46 if hover else 24)
             bord = (230, 242, 255, 210 if hover else 135)
             screen.blit(self._glass(self.btn_unlock.size, fill, bord, 13), self.btn_unlock.topleft)
-            lbl = self.small.render("Открепить камеру [F]", True, (242, 248, 255))
+            lbl = self.small.render(t["btn_unlock"], True, (242, 248, 255))
             screen.blit(
                 lbl,
                 (
@@ -232,7 +213,7 @@ class HUD:
                 ),
             )
         else:
-            hint = self.small.render("ЛКМ — закрепить камеру", True, (142, 162, 188))
+            hint = self.small.render(t["card_hint_lock"], True, (142, 162, 188))
             screen.blit(hint, (self.card_rect.centerx - hint.get_width() // 2, self.card_rect.bottom - 26))
 
     def draw(
@@ -249,6 +230,7 @@ class HUD:
         focused_body=None,
         hovered_body=None,
     ):
+        t = get_text(self.lang)
         mp = pygame.mouse.get_pos()
 
         m_hover = self.menu_btn.collidepoint(mp)
@@ -261,13 +243,13 @@ class HUD:
             ),
             self.menu_btn.topleft,
         )
-        m_txt = self.bold.render("МЕНЮ", True, (245, 250, 255) if m_hover else (216, 226, 242))
+        m_txt = self.bold.render(t["hud_menu"], True, (245, 250, 255) if m_hover else (216, 226, 242))
         screen.blit(m_txt, (self.menu_btn.centerx - m_txt.get_width() // 2, self.menu_btn.centery - m_txt.get_height() // 2))
 
-        p_ru = PRESET_RU.get(preset_name, preset_name)
+        p_loc = preset_label(self.lang, preset_name)
         body_cnt = sum(1 for b in bodies if b["kind"] != "core")
         mode_s = "ASCII" if ascii_mode else "HD"
-        status_txt = f"{p_ru}   ·   {n_stars // 1000}k звёзд   ·   тел: {body_cnt}   ·   {mode_s}"
+        status_txt = f"{p_loc}   ·   {n_stars // 1000}k {t['hud_stars_unit']}   ·   {t['hud_bodies']}: {body_cnt}   ·   {mode_s}"
         s_surf = self.font.render(status_txt, True, (224, 232, 244))
         self.status_rect.width = s_surf.get_width() + 28
         screen.blit(self._glass(self.status_rect.size, radius=16), self.status_rect.topleft)
@@ -298,7 +280,7 @@ class HUD:
         p_fill = (255, 198, 120, 52 if p_hov else 30) if paused else (215, 232, 255, 44 if p_hov else 18)
         p_bord = (255, 212, 145, 200) if paused else (230, 242, 255, 185 if p_hov else 85)
         screen.blit(self._glass(self.btn_pause.size, p_fill, p_bord, 12), self.btn_pause.topleft)
-        p_lbl = self.small.render("ПУСК" if paused else "ПАУЗА", True, (255, 232, 190) if paused else (228, 236, 248))
+        p_lbl = self.small.render(t["hud_play"] if paused else t["hud_pause"], True, (255, 232, 190) if paused else (228, 236, 248))
         screen.blit(p_lbl, (self.btn_pause.centerx - p_lbl.get_width() // 2, self.btn_pause.centery - p_lbl.get_height() // 2))
 
         fps_s = self.meta.render(f"{fps:2d} FPS", True, (176, 188, 206))

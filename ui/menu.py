@@ -2,14 +2,7 @@ import time
 import pygame
 from config import W, H, STAR_OPTIONS
 from sim.presets import PRESET_INFO
-
-SCENARIO_RU = {
-    1: ("Слияние спиралей", "Две спиральные галактики на курсе приливного столкновения"),
-    2: ("Кольцевой удар", "Лобовое столкновение с образованием ударного кольца звёзд"),
-    3: ("Хаос трёх тел", "Три нестабильные галактики, разрываемые в орбитальные рукава"),
-    4: ("Чёрная дыра", "Сверхмассивная чёрная дыра разрывает проходящую спираль"),
-    5: ("Планетная система", "Центральная звезда с планетами внутри пылевого диска"),
-}
+from ui.lang import get_text
 
 
 class MainMenu:
@@ -23,33 +16,26 @@ class MainMenu:
 
         self.vignette = self._build_vignette()
 
-        self.menu_items = [
-            ("continue", "ПРОДОЛЖИТЬ"),
-            ("planetarium", "ПЛАНЕТАРИЙ"),
-            ("settings", "НАСТРОЙКИ"),
-            ("editor", "РЕДАКТОР"),
-            ("quit", "ВЫХОД"),
-        ]
-
+        self.menu_keys = ("continue", "planetarium", "settings", "editor", "quit")
         self.item_rects = []
         y = 282
-        for key, _ in self.menu_items:
+        for key in self.menu_keys:
             if key == "quit":
                 y += 28
             self.item_rects.append((key, pygame.Rect(82, y, 270, 38)))
             y += 46
 
         self.active_panel = None
-        self.panel_rect = pygame.Rect(450, 148, 690, 456)
+        self.panel_rect = pygame.Rect(450, 136, 690, 480)
         self.close_rect = pygame.Rect(self.panel_rect.right - 38, self.panel_rect.y + 14, 24, 24)
         self.preset_rects = [
-            pygame.Rect(self.panel_rect.x + 28, self.panel_rect.y + 66 + i * 62, 634, 52)
+            pygame.Rect(self.panel_rect.x + 28, self.panel_rect.y + 66 + i * 64, 634, 54)
             for i in range(len(PRESET_INFO))
         ]
         self.launch_panel_rect = pygame.Rect(self.panel_rect.x + 28, self.panel_rect.bottom - 56, 250, 38)
         self.setting_rects = [
-            pygame.Rect(self.panel_rect.x + 28, self.panel_rect.y + 66 + i * 48, 634, 38)
-            for i in range(5)
+            pygame.Rect(self.panel_rect.x + 28, self.panel_rect.y + 62 + i * 44, 634, 36)
+            for i in range(6)
         ]
 
         self._last_t = time.perf_counter()
@@ -127,19 +113,22 @@ class MainMenu:
 
                 elif self.active_panel == "settings":
                     if self.setting_rects[0].collidepoint(mp):
+                        cfg["lang"] = "en" if cfg.get("lang", "ru") == "ru" else "ru"
+                        return "lang_changed"
+                    if self.setting_rects[1].collidepoint(mp):
                         cur = STAR_OPTIONS.index(cfg["stars"]) if cfg["stars"] in STAR_OPTIONS else 1
                         cfg["stars"] = STAR_OPTIONS[(cur + 1) % len(STAR_OPTIONS)]
                         return "setting_changed"
-                    if self.setting_rects[1].collidepoint(mp):
+                    if self.setting_rects[2].collidepoint(mp):
                         cfg["ascii"] = not cfg["ascii"]
                         return "setting_changed"
-                    if self.setting_rects[2].collidepoint(mp):
+                    if self.setting_rects[3].collidepoint(mp):
                         cfg["trails"] = not cfg["trails"]
                         return "setting_changed"
-                    if self.setting_rects[3].collidepoint(mp):
+                    if self.setting_rects[4].collidepoint(mp):
                         cfg["orbits"] = not cfg["orbits"]
                         return "setting_changed"
-                    if self.setting_rects[4].collidepoint(mp):
+                    if self.setting_rects[5].collidepoint(mp):
                         cfg["jets"] = not cfg["jets"]
                         return "setting_changed"
 
@@ -149,12 +138,14 @@ class MainMenu:
         return None
 
     def _draw_side_panel(self, screen, cfg, mp):
+        t = get_text(cfg.get("lang", "ru"))
+
         panel = pygame.Surface(self.panel_rect.size, pygame.SRCALPHA)
         pygame.draw.rect(panel, (8, 12, 20, 188), panel.get_rect(), border_radius=10)
         pygame.draw.rect(panel, (185, 205, 232, 72), panel.get_rect(), 1, border_radius=10)
         screen.blit(panel, self.panel_rect.topleft)
 
-        title = "НАСТРОЙКИ" if self.active_panel == "settings" else "РЕДАКТОР СЦЕНАРИЕВ"
+        title = t["panel_settings"] if self.active_panel == "settings" else t["panel_editor"]
         self._draw_text(screen, self.head_font, title, (self.panel_rect.x + 28, self.panel_rect.y + 20), (236, 242, 252))
         pygame.draw.line(
             screen,
@@ -171,7 +162,7 @@ class MainMenu:
 
         if self.active_panel == "editor":
             for (pid, fallback_name, fallback_desc), r in zip(PRESET_INFO, self.preset_rects):
-                name, desc = SCENARIO_RU.get(pid, (fallback_name, fallback_desc))
+                name, desc = t["scenarios"].get(pid, (fallback_name, fallback_desc))
                 selected = cfg["preset"] == pid
                 hover = r.collidepoint(mp)
 
@@ -186,8 +177,8 @@ class MainMenu:
                     pygame.draw.rect(row, (18, 24, 36, 110), row.get_rect(), border_radius=7)
                 screen.blit(row, r.topleft)
 
-                self._draw_text(screen, self.item_font, f"{pid}. {name}", (r.x + 14, r.y + 7), (242, 246, 255))
-                screen.blit(self.desc_font.render(desc, True, (162, 176, 198)), (r.x + 14, r.y + 29))
+                self._draw_text(screen, self.item_font, f"{pid}. {name}", (r.x + 14, r.y + 8), (242, 246, 255))
+                screen.blit(self.desc_font.render(desc, True, (162, 176, 198)), (r.x + 14, r.y + 30))
 
             l_hover = self.launch_panel_rect.collidepoint(mp)
             self._draw_pill(
@@ -196,7 +187,7 @@ class MainMenu:
                 fill_alpha=52 if l_hover else 28,
                 border_alpha=225 if l_hover else 140,
             )
-            lbl = self.menu_font.render("ЗАПУСТИТЬ", True, (245, 250, 255))
+            lbl = self.menu_font.render(t["btn_launch"], True, (245, 250, 255))
             screen.blit(
                 lbl,
                 (
@@ -207,13 +198,14 @@ class MainMenu:
 
         elif self.active_panel == "settings":
             rows = [
-                ("Частицы звёзд", f"{cfg['stars']:,}"),
-                ("Режим рендера", "ASCII" if cfg["ascii"] else "HD"),
-                ("Шлейфы звёзд", "ВКЛ" if cfg["trails"] else "ВЫКЛ"),
-                ("Линии орбит", "ВКЛ" if cfg["orbits"] else "ВЫКЛ"),
-                ("Джеты чёрных дыр", "ВКЛ" if cfg["jets"] else "ВЫКЛ"),
+                (t["set_lang"], t["lang_name"], True),
+                (t["set_stars"], f"{cfg['stars']:,}", True),
+                (t["set_render"], "ASCII" if cfg["ascii"] else "HD", True),
+                (t["set_trails"], t["on"] if cfg["trails"] else t["off"], cfg["trails"]),
+                (t["set_orbits"], t["on"] if cfg["orbits"] else t["off"], cfg["orbits"]),
+                (t["set_jets"], t["on"] if cfg["jets"] else t["off"], cfg["jets"]),
             ]
-            for (label, val), r in zip(rows, self.setting_rects):
+            for (label, val, is_on), r in zip(rows, self.setting_rects):
                 hover = r.collidepoint(mp)
                 row = pygame.Surface(r.size, pygame.SRCALPHA)
                 pygame.draw.rect(
@@ -226,20 +218,13 @@ class MainMenu:
                     pygame.draw.rect(row, (220, 235, 255, 130), row.get_rect(), 1, border_radius=6)
                 screen.blit(row, r.topleft)
 
-                self._draw_text(screen, self.item_font, label, (r.x + 14, r.y + 9), (225, 234, 246))
-                val_col = (242, 248, 255) if val != "ВЫКЛ" else (150, 162, 180)
+                self._draw_text(screen, self.item_font, label, (r.x + 14, r.y + 8), (225, 234, 246))
+                val_col = (242, 248, 255) if is_on else (150, 162, 180)
                 vs = self.item_font.render(val, True, val_col)
-                screen.blit(vs, (r.right - vs.get_width() - 16, r.y + 9))
+                screen.blit(vs, (r.right - vs.get_width() - 16, r.y + 8))
 
-            hints = [
-                "ЛКМ / Колесо   —  вращение камеры и зум",
-                "ПКМ клик       —  создать планету на орбите",
-                "ПКМ + тянуть   —  запуск планеты по траектории",
-                "Q / E / 1-5    —  выбор объекта / смена сценария",
-                "T / O / Tab    —  замедление / орбиты / режим ASCII",
-            ]
-            hy = self.panel_rect.y + 322
-            for line in hints:
+            hy = self.panel_rect.y + 338
+            for line in t["menu_hints"]:
                 screen.blit(self.desc_font.render(line, True, (152, 168, 190)), (self.panel_rect.x + 32, hy))
                 hy += 21
 
@@ -250,12 +235,13 @@ class MainMenu:
         if 0.0005 < dt < 0.5:
             self._fps = self._fps * 0.9 + (1.0 / dt) * 0.1
 
+        t = get_text(cfg.get("lang", "ru"))
         mp = pygame.mouse.get_pos()
         screen.blit(self.vignette, (0, 0))
 
         self._draw_text(screen, self.title_font, "GRAVITY FORGE", (128, 92), (245, 248, 255))
 
-        for (key, label), (_, r) in zip(self.menu_items, self.item_rects):
+        for (key, label), (_, r) in zip(t["menu_items"], self.item_rects):
             hover = r.collidepoint(mp)
             is_open = (key == "settings" and self.active_panel == "settings") or (
                 key == "editor" and self.active_panel == "editor"

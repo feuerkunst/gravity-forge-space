@@ -17,7 +17,8 @@ from render.hd import HDRenderer
 from render.ascii import AsciiRenderer
 from render.planets import PlanetRenderer
 from ui.menu import MainMenu
-from ui.hud import HUD, BODY_RU, PRESET_RU
+from ui.hud import HUD
+from ui.lang import get_text, body_label, preset_label
 
 SPEED_STEPS = (0.1, 0.25, 0.5, 1.0, 2.0, 4.0)
 DEFAULT_SPEED_IDX = 3
@@ -29,14 +30,8 @@ def main():
     screen = pygame.display.set_mode((W, H), pygame.DOUBLEBUF)
     clock = pygame.time.Clock()
 
-    hd_renderer = HDRenderer()
-    ascii_renderer = AsciiRenderer()
-    planet_renderer = PlanetRenderer()
-    menu = MainMenu()
-    hud = HUD()
-    bg_stars = make_background_stars()
-
     cfg = {
+        "lang": "ru",
         "preset": 1,
         "stars": DEFAULT_STARS,
         "ascii": False,
@@ -44,6 +39,13 @@ def main():
         "orbits": True,
         "jets": True,
     }
+
+    hd_renderer = HDRenderer()
+    ascii_renderer = AsciiRenderer()
+    planet_renderer = PlanetRenderer()
+    menu = MainMenu()
+    hud = HUD(lang=cfg["lang"])
+    bg_stars = make_background_stars()
 
     pos, vel, base_cols, bodies, preset_name = load_preset(cfg["preset"], cfg["stars"])
 
@@ -71,18 +73,22 @@ def main():
     aim_start_px = (0, 0)
     aim_world = np.zeros(3, dtype=np.float32)
 
+    def tr(key, **kw):
+        msg = get_text(cfg["lang"])[key]
+        return msg.format(**kw) if kw else msg
+
     def set_speed(new_idx):
         nonlocal speed_idx
         new_idx = max(0, min(len(SPEED_STEPS) - 1, new_idx))
         if new_idx != speed_idx:
             speed_idx = new_idx
-            hud.notify(f"Скорость: {SPEED_STEPS[speed_idx]:g}x")
+            hud.notify(tr("t_speed", v=f"{SPEED_STEPS[speed_idx]:g}"))
 
     def cycle_focus(step):
         nonlocal focused_body, auto_spin
         pool = [b for b in bodies if b["kind"] != "core"]
         if not pool:
-            hud.notify("Нет объектов для фокуса")
+            hud.notify(tr("t_no_focus"))
             return
         if focused_body in pool:
             idx = (pool.index(focused_body) + step) % len(pool)
@@ -90,7 +96,7 @@ def main():
             idx = 0 if step > 0 else len(pool) - 1
         focused_body = pool[idx]
         auto_spin = False
-        hud.notify(f"Камера: {BODY_RU.get(focused_body['id'], focused_body['name'])}")
+        hud.notify(tr("t_cam_focus", name=body_label(cfg["lang"], focused_body["id"], focused_body["name"])))
 
     def start_simulation():
         nonlocal pos, vel, base_cols, bodies, preset_name
@@ -107,7 +113,7 @@ def main():
         hovered_body = None
         in_menu = False
         has_session = True
-        hud.notify(f"Сценарий: {PRESET_RU.get(preset_name, preset_name)}")
+        hud.notify(tr("t_scenario", name=preset_label(cfg["lang"], preset_name)))
 
     running = True
     while running:
@@ -134,6 +140,8 @@ def main():
                     in_menu = False
                 elif action == "quit":
                     running = False
+                elif action == "lang_changed":
+                    hud.set_lang(cfg["lang"])
                 elif action == "preset_preview" and not has_session:
                     pos, vel, base_cols, bodies, preset_name = load_preset(cfg["preset"], cfg["stars"])
                     hd_renderer.clear_trails()
@@ -152,7 +160,7 @@ def main():
                     aiming_spawn = False
                 elif k == pygame.K_SPACE:
                     paused = not paused
-                    hud.notify("Пауза" if paused else f"Продолжено ({time_scale:g}x)")
+                    hud.notify(tr("t_paused") if paused else tr("t_resumed", v=f"{time_scale:g}"))
                 elif k in (pygame.K_MINUS, pygame.K_KP_MINUS):
                     set_speed(speed_idx - 1)
                 elif k in (pygame.K_EQUALS, pygame.K_PLUS, pygame.K_KP_PLUS):
@@ -166,50 +174,50 @@ def main():
                 elif k == pygame.K_f:
                     if focused_body is not None:
                         focused_body = None
-                        hud.notify("Камера откреплена")
+                        hud.notify(tr("t_cam_unlocked"))
                 elif k == pygame.K_TAB:
                     cfg["ascii"] = not cfg["ascii"]
                     hd_renderer.clear_trails()
-                    hud.notify("Режим: ASCII" if cfg["ascii"] else "Режим: HD")
+                    hud.notify(tr("t_mode", mode="ASCII" if cfg["ascii"] else "HD"))
                 elif k == pygame.K_g:
                     cfg["trails"] = not cfg["trails"]
                     hd_renderer.clear_trails()
-                    hud.notify("Шлейфы ВКЛ" if cfg["trails"] else "Шлейфы ВЫКЛ")
+                    hud.notify(tr("t_trails_on" if cfg["trails"] else "t_trails_off"))
                 elif k == pygame.K_o:
                     cfg["orbits"] = not cfg["orbits"]
-                    hud.notify("Орбиты ВКЛ" if cfg["orbits"] else "Орбиты ВЫКЛ")
+                    hud.notify(tr("t_orbits_on" if cfg["orbits"] else "t_orbits_off"))
                 elif k == pygame.K_j:
                     cfg["jets"] = not cfg["jets"]
-                    hud.notify("Джеты ВКЛ" if cfg["jets"] else "Джеты ВЫКЛ")
+                    hud.notify(tr("t_jets_on" if cfg["jets"] else "t_jets_off"))
                 elif k == pygame.K_h:
                     show_hud = not show_hud
                 elif k == pygame.K_v:
                     focused_body = None
                     yaw, pitch, dist = 0.25, 0.42, 38.0 if cfg["preset"] != 5 else 28.0
                     auto_spin = True
-                    hud.notify("Камера сброшена")
+                    hud.notify(tr("t_cam_reset"))
                 elif k == pygame.K_q:
                     selected_spawn = (selected_spawn - 1) % len(SPAWN_CATALOG)
                     spec = SPAWN_CATALOG[selected_spawn]
-                    hud.notify(f"Объект: {BODY_RU.get(spec['id'], spec['name'])}")
+                    hud.notify(tr("t_object", name=body_label(cfg["lang"], spec["id"], spec["name"])))
                 elif k == pygame.K_e:
                     selected_spawn = (selected_spawn + 1) % len(SPAWN_CATALOG)
                     spec = SPAWN_CATALOG[selected_spawn]
-                    hud.notify(f"Объект: {BODY_RU.get(spec['id'], spec['name'])}")
+                    hud.notify(tr("t_object", name=body_label(cfg["lang"], spec["id"], spec["name"])))
                 elif k == pygame.K_r:
                     start_simulation()
                 elif k == pygame.K_c:
                     bodies = [b for b in bodies if b["kind"] == "core"]
                     focused_body = None
                     hovered_body = None
-                    hud.notify("Созданные объекты удалены")
+                    hud.notify(tr("t_cleared"))
                 elif k in (pygame.K_1, pygame.K_2, pygame.K_3, pygame.K_4, pygame.K_5):
                     cfg["preset"] = k - pygame.K_0
                     start_simulation()
                 elif k == pygame.K_s:
                     fname = f"gravity_{int(time.time())}.png"
                     pygame.image.save(screen, fname)
-                    hud.notify(f"Снимок: {fname}", 2.2)
+                    hud.notify(tr("t_screenshot", fname=fname), 2.2)
 
             elif ev.type == pygame.MOUSEBUTTONDOWN:
                 if ev.button == 1:
@@ -228,11 +236,11 @@ def main():
                             paused = not paused
                         elif act == "unlock":
                             focused_body = None
-                            hud.notify("Камера откреплена")
+                            hud.notify(tr("t_cam_unlocked"))
                         elif act == "slot":
                             selected_spawn = val
                             spec = SPAWN_CATALOG[selected_spawn]
-                            hud.notify(f"Выбрано: {BODY_RU.get(spec['id'], spec['name'])}")
+                            hud.notify(tr("t_selected", name=body_label(cfg["lang"], spec["id"], spec["name"])))
                         continue
 
                     if not hud.is_over_ui(ev.pos, show_hud, has_card):
@@ -256,28 +264,28 @@ def main():
                         if picked is not None:
                             focused_body = picked
                             auto_spin = False
-                            hud.notify(f"Камера: {BODY_RU.get(picked['id'], picked['name'])}")
+                            hud.notify(tr("t_cam_focus", name=body_label(cfg["lang"], picked["id"], picked["name"])))
 
                 elif ev.button == 3 and aiming_spawn:
                     aiming_spawn = False
                     dx_px = ev.pos[0] - aim_start_px[0]
                     dy_px = ev.pos[1] - aim_start_px[1]
                     spec = SPAWN_CATALOG[selected_spawn]
-                    ru_name = BODY_RU.get(spec["id"], spec["name"])
+                    loc_name = body_label(cfg["lang"], spec["id"], spec["name"])
                     mods = pygame.key.get_mods()
 
                     if dx_px * dx_px + dy_px * dy_px > 100:
                         _, _, right, up = get_camera(yaw, pitch, dist, target)
                         launch_vel = (right * dx_px - up * dy_px) * 0.045
                         bodies.append(make_body(spec["id"], aim_world, launch_vel))
-                        hud.notify(f"Запуск: {ru_name}")
+                        hud.notify(tr("t_launched", name=loc_name))
                     elif (mods & pygame.KMOD_SHIFT) or spec["kind"] == "repulsor":
                         bodies.append(make_body(spec["id"], aim_world, np.zeros(3, dtype=np.float32)))
-                        hud.notify(f"Создано: {ru_name}")
+                        hud.notify(tr("t_spawned", name=loc_name))
                     else:
                         orb_v = compute_orbit_velocity(aim_world, bodies)
                         bodies.append(make_body(spec["id"], aim_world, orb_v))
-                        hud.notify(f"На орбите: {ru_name}")
+                        hud.notify(tr("t_orbiting", name=loc_name))
 
             elif ev.type == pygame.MOUSEMOTION and dragging_cam:
                 dx = ev.pos[0] - last_m[0]
@@ -315,7 +323,7 @@ def main():
 
             if focused_body is not None and focused_body not in bodies:
                 focused_body = None
-                hud.notify("Объект поглощён — камера откреплена")
+                hud.notify(tr("t_absorbed"))
             elif focused_body is not None and prev_focus_pos is not None:
                 target += focused_body["pos"] - prev_focus_pos
 
