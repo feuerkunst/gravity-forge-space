@@ -28,3 +28,7 @@ python main.py
 - **Q / E** — выбор объекта, **1–5** — сценарии
 - **- / +** — скорость времени (0.1x–4x), **Пробел** — пауза
 - **Tab** — режим ASCII, **O** — орбиты, **H** — скрыть HUD, **F11** — полный экран
+
+# Features
+
+- **Live orbit prediction & impact FX:** real-time dashed trajectory preview with collision marker when aiming (`RMB`), plus shockwave flashes and gravitational debris on body impacts

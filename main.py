@@ -11,11 +11,12 @@ except Exception:
 from config import W, H, DEFAULT_STARS
 from sim.bodies import SPAWN_CATALOG, make_body, compute_orbit_velocity
 from sim.presets import load_preset, make_background_stars
-from sim.physics import step_physics
+from sim.physics import step_physics, predict_orbit
 from render.camera import get_camera, screen_to_world, pick_body
 from render.hd import HDRenderer
 from render.ascii import AsciiRenderer
 from render.planets import PlanetRenderer
+from render.effects import ImpactSystem
 from ui.menu import MainMenu
 from ui.hud import HUD
 from ui.lang import get_text, body_label, preset_label
@@ -43,6 +44,7 @@ def main():
     hd_renderer = HDRenderer()
     ascii_renderer = AsciiRenderer()
     planet_renderer = PlanetRenderer()
+    impact_fx = ImpactSystem()
     menu = MainMenu()
     hud = HUD(lang=cfg["lang"])
     bg_stars = make_background_stars()
@@ -84,6 +86,18 @@ def main():
             speed_idx = new_idx
             hud.notify(tr("t_speed", v=f"{SPEED_STEPS[speed_idx]:g}"))
 
+    def get_aim_launch(cur_px, right_v, up_v):
+        spec = SPAWN_CATALOG[selected_spawn]
+        dx_px = cur_px[0] - aim_start_px[0]
+        dy_px = cur_px[1] - aim_start_px[1]
+        mods = pygame.key.get_mods()
+
+        if dx_px * dx_px + dy_px * dy_px > 100:
+            return (right_v * dx_px - up_v * dy_px) * 0.045, "slingshot"
+        if (mods & pygame.KMOD_SHIFT) or spec["kind"] == "repulsor":
+            return np.zeros(3, dtype=np.float32), "static"
+        return compute_orbit_velocity(aim_world, bodies), "orbit"
+
     def cycle_focus(step):
         nonlocal focused_body, auto_spin
         pool = [b for b in bodies if b["kind"] != "core"]
@@ -104,6 +118,7 @@ def main():
         nonlocal focused_body, hovered_body
         pos, vel, base_cols, bodies, preset_name = load_preset(cfg["preset"], cfg["stars"])
         hd_renderer.clear_trails()
+        impact_fx.clear()
         yaw, pitch, dist = 0.25, 0.42, 38.0 if cfg["preset"] != 5 else 28.0
         target = np.zeros(3, dtype=np.float32)
         paused = False
@@ -145,11 +160,13 @@ def main():
                 elif action == "preset_preview" and not has_session:
                     pos, vel, base_cols, bodies, preset_name = load_preset(cfg["preset"], cfg["stars"])
                     hd_renderer.clear_trails()
+                    impact_fx.clear()
                     target = np.zeros(3, dtype=np.float32)
                 elif action == "setting_changed" and not has_session:
                     if pos.shape[0] != cfg["stars"]:
                         pos, vel, base_cols, bodies, preset_name = load_preset(cfg["preset"], cfg["stars"])
                         hd_renderer.clear_trails()
+                        impact_fx.clear()
                 continue
 
             if ev.type == pygame.KEYDOWN:
@@ -208,6 +225,7 @@ def main():
                     start_simulation()
                 elif k == pygame.K_c:
                     bodies = [b for b in bodies if b["kind"] == "core"]
+                    impact_fx.clear()
                     focused_body = None
                     hovered_body = None
                     hud.notify(tr("t_cleared"))
@@ -268,23 +286,17 @@ def main():
 
                 elif ev.button == 3 and aiming_spawn:
                     aiming_spawn = False
-                    dx_px = ev.pos[0] - aim_start_px[0]
-                    dy_px = ev.pos[1] - aim_start_px[1]
                     spec = SPAWN_CATALOG[selected_spawn]
                     loc_name = body_label(cfg["lang"], spec["id"], spec["name"])
-                    mods = pygame.key.get_mods()
+                    _, _, right, up = get_camera(yaw, pitch, dist, target)
+                    launch_vel, mode = get_aim_launch(ev.pos, right, up)
+                    bodies.append(make_body(spec["id"], aim_world, launch_vel))
 
-                    if dx_px * dx_px + dy_px * dy_px > 100:
-                        _, _, right, up = get_camera(yaw, pitch, dist, target)
-                        launch_vel = (right * dx_px - up * dy_px) * 0.045
-                        bodies.append(make_body(spec["id"], aim_world, launch_vel))
+                    if mode == "slingshot":
                         hud.notify(tr("t_launched", name=loc_name))
-                    elif (mods & pygame.KMOD_SHIFT) or spec["kind"] == "repulsor":
-                        bodies.append(make_body(spec["id"], aim_world, np.zeros(3, dtype=np.float32)))
+                    elif mode == "static":
                         hud.notify(tr("t_spawned", name=loc_name))
                     else:
-                        orb_v = compute_orbit_velocity(aim_world, bodies)
-                        bodies.append(make_body(spec["id"], aim_world, orb_v))
                         hud.notify(tr("t_orbiting", name=loc_name))
 
             elif ev.type == pygame.MOUSEMOTION and dragging_cam:
@@ -307,7 +319,10 @@ def main():
         if in_menu:
             yaw += real_dt * 0.14
             if not has_session:
-                step_physics(pos, vel, bodies, real_dt * 0.35, jets_enabled=cfg["jets"])
+                menu_dt = real_dt * 0.35
+                for imp in step_physics(pos, vel, bodies, menu_dt, jets_enabled=cfg["jets"]):
+                    impact_fx.spawn(imp)
+                impact_fx.update(menu_dt, bodies)
         else:
             if auto_spin and not paused:
                 yaw += real_dt * 0.11
@@ -319,7 +334,9 @@ def main():
                 substeps = 2 if time_scale <= 1.0 else (3 if time_scale <= 2.0 else 4)
                 sub_dt = sim_dt / substeps
                 for _ in range(substeps):
-                    step_physics(pos, vel, bodies, sub_dt, jets_enabled=cfg["jets"])
+                    for imp in step_physics(pos, vel, bodies, sub_dt, jets_enabled=cfg["jets"]):
+                        impact_fx.spawn(imp)
+                impact_fx.update(sim_dt, bodies)
 
             if focused_body is not None and focused_body not in bodies:
                 focused_body = None
@@ -354,6 +371,7 @@ def main():
             hd_renderer.render(screen, pos, vel, base_cols, cam_pos, fwd, right, up, bg_stars, cfg["trails"])
 
         planet_renderer.draw_bodies(screen, bodies, cam_pos, fwd, right, up, show_orbits=cfg["orbits"])
+        impact_fx.draw(screen, cam_pos, fwd, right, up)
 
         if not in_menu:
             if show_hud:
@@ -363,7 +381,19 @@ def main():
                     hud.draw_reticle(screen, hovered_body, cam_pos, fwd, right, up, locked=False)
 
             if aiming_spawn:
-                hud.draw_slingshot(screen, aim_start_px, pygame.mouse.get_pos(), SPAWN_CATALOG[selected_spawn])
+                cur_mp = pygame.mouse.get_pos()
+                spec = SPAWN_CATALOG[selected_spawn]
+                prev_vel, mode = get_aim_launch(cur_mp, right, up)
+                spd_val = float(np.linalg.norm(prev_vel))
+                if spec["kind"] != "repulsor" and mode != "static":
+                    pts_3d, hit_pos = predict_orbit(
+                        aim_world,
+                        prev_vel,
+                        bodies,
+                        body_radius=spec.get("radius", 0.4),
+                    )
+                    hud.draw_trajectory(screen, pts_3d, hit_pos, cam_pos, fwd, right, up, spec["atmo"])
+                hud.draw_slingshot(screen, aim_start_px, cur_mp, spec, speed_val=spd_val if mode != "static" else None)
 
             if show_hud:
                 hud.draw(

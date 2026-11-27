@@ -24,6 +24,66 @@ def _get_buffers(n):
     return buf
 
 
+def predict_orbit(start_pos, start_vel, bodies, body_radius=0.4, steps=96, dt=0.045):
+    pts = np.empty((steps + 1, 3), dtype=np.float32)
+    p = np.asarray(start_pos, dtype=np.float32).copy()
+    v = np.asarray(start_vel, dtype=np.float32).copy()
+    pts[0] = p
+
+    active = [b for b in bodies if b["kind"] != "repulsor"]
+    nb = len(active)
+    if nb == 0:
+        for s in range(1, steps + 1):
+            p = p + v * dt
+            pts[s] = p
+        return pts, None
+
+    b_pos = np.array([b["pos"] for b in active], dtype=np.float32)
+    b_vel = np.array([b["vel"] for b in active], dtype=np.float32)
+    b_mass = np.array([b["mass"] for b in active], dtype=np.float32)
+    b_rad = np.array([b["radius"] for b in active], dtype=np.float32)
+    b_solid = np.array([b["kind"] != "core" for b in active], dtype=bool)
+    merge_r2 = ((b_rad + float(body_radius)) * 0.72) ** 2
+
+    eps2_b = np.float32(SOFTENING * SOFTENING * 2.2)
+    g_f = np.float32(G)
+    dt_f = np.float32(dt)
+    hit_pos = None
+    count = 1
+
+    for _ in range(steps):
+        diff = b_pos - p[None, :]
+        d2 = np.sum(diff * diff, axis=1) + eps2_b
+        inv_d3 = g_f * b_mass / (d2 * np.sqrt(d2))
+        acc = np.sum(diff * inv_d3[:, None], axis=0)
+
+        if nb > 1:
+            d_mat = b_pos[None, :, :] - b_pos[:, None, :]
+            r2 = np.sum(d_mat * d_mat, axis=2) + eps2_b
+            np.fill_diagonal(r2, 1.0)
+            f_mat = g_f * b_mass[None, :] / (r2 * np.sqrt(r2))
+            np.fill_diagonal(f_mat, 0.0)
+            b_acc = np.sum(d_mat * f_mat[:, :, None], axis=1)
+            b_vel += b_acc * dt_f
+            b_pos += b_vel * dt_f
+        else:
+            b_pos += b_vel * dt_f
+
+        v += acc * dt_f
+        p += v * dt_f
+        pts[count] = p
+        count += 1
+
+        if np.any(b_solid):
+            rel_s = b_pos[b_solid] - p[None, :]
+            dist2_s = np.sum(rel_s * rel_s, axis=1)
+            if np.any(dist2_s < merge_r2[b_solid]):
+                hit_pos = p.copy()
+                break
+
+    return pts[:count], hit_pos
+
+
 def step_physics(pos, vel, bodies, dt, jets_enabled=True):
     dt_f = np.float32(dt)
     eps2 = np.float32(SOFTENING * SOFTENING)
@@ -58,6 +118,7 @@ def step_physics(pos, vel, bodies, dt, jets_enabled=True):
                         b["trail"].pop(0)
 
     removed = set()
+    impacts = []
     for i in range(nb):
         if i in removed or bodies[i]["kind"] in ("core", "repulsor"):
             continue
@@ -72,11 +133,27 @@ def step_physics(pos, vel, bodies, dt, jets_enabled=True):
                     big, small, idx_rem = bodies[i], bodies[j], j
                 else:
                     big, small, idx_rem = bodies[j], bodies[i], i
+
+                r_sum = max(1e-5, big["radius"] + small["radius"])
+                hit_p = big["pos"] + (small["pos"] - big["pos"]) * (big["radius"] / r_sum)
+                rel_spd = float(np.linalg.norm(small["vel"] - big["vel"]))
+
                 tot_m = big["mass"] + small["mass"]
                 if tot_m > 0.1:
                     big["vel"] = (big["vel"] * big["mass"] + small["vel"] * small["mass"]) / tot_m
                     big["mass"] = tot_m
                     big["radius"] = min(1.85, (big["radius"] ** 3 + small["radius"] ** 3 * 0.4) ** (1.0 / 3.0))
+
+                impacts.append({
+                    "pos": hit_p.astype(np.float32),
+                    "vel": big["vel"].copy(),
+                    "radius": float(max(small["radius"], big["radius"] * 0.45)),
+                    "rel_speed": rel_spd,
+                    "color": small.get("color", (255, 195, 120)),
+                    "atmo": small.get("atmo", (255, 150, 75)),
+                    "is_bh": big["kind"] == "bh" or small["kind"] == "bh",
+                })
+
                 removed.add(idx_rem)
                 if idx_rem == i:
                     break
@@ -146,3 +223,5 @@ def step_physics(pos, vel, bodies, dt, jets_enabled=True):
     px += dx
     py += dy
     pz += dz
+
+    return impacts

@@ -120,14 +120,65 @@ class HUD:
                 return ("slot", i)
         return None
 
-    def draw_slingshot(self, screen, start_px, cur_px, spawn_spec):
+    def draw_trajectory(self, screen, pts_3d, hit_pos, cam_pos, fwd, right, up, color):
+        n = len(pts_3d)
+        if n < 2:
+            return
+
+        cam_basis = np.stack([right, -up, fwd], axis=1).astype(np.float32)
+        cam_p = (pts_3d - cam_pos[None, :]) @ cam_basis
+        zs = cam_p[:, 2]
+        valid = zs > 0.6
+        if np.count_nonzero(valid) < 2:
+            return
+
+        inv_z = FOCAL / np.maximum(zs, 0.6)
+        xs = (cam_p[:, 0] * inv_z + W * 0.5).astype(np.int32).tolist()
+        ys = (cam_p[:, 1] * inv_z + H * 0.5).astype(np.int32).tolist()
+        val_l = valid.tolist()
+
+        base_c = (255, 132, 86) if hit_pos is not None else color
+        draw_line = pygame.draw.line
+
+        for i in range(n - 1):
+            if (i % 3) == 2:
+                continue
+            if not (val_l[i] and val_l[i + 1]):
+                continue
+            x0, y0, x1, y1 = xs[i], ys[i], xs[i + 1], ys[i + 1]
+            if max(abs(x0), abs(x1)) > W + 300 or max(abs(y0), abs(y1)) > H + 300:
+                continue
+            fade = (1.0 - (i / n)) ** 1.15 * 0.88 + 0.10
+            col = (
+                int(base_c[0] * fade),
+                int(base_c[1] * fade),
+                int(base_c[2] * fade),
+            )
+            draw_line(screen, col, (x0, y0), (x1, y1), 2 if i < 18 else 1)
+
+        if hit_pos is not None:
+            proj = world_to_screen(hit_pos, cam_pos, fwd, right, up)
+            if proj is not None:
+                hx, hy, _ = proj
+                if -40 <= hx <= W + 40 and -40 <= hy <= H + 40:
+                    pygame.draw.circle(screen, (255, 115, 72), (hx, hy), 9, 2)
+                    pygame.draw.line(screen, (255, 200, 150), (hx - 5, hy - 5), (hx + 5, hy + 5), 2)
+                    pygame.draw.line(screen, (255, 200, 150), (hx + 5, hy - 5), (hx - 5, hy + 5), 2)
+
+    def draw_slingshot(self, screen, start_px, cur_px, spawn_spec, speed_val=None):
         t = get_text(self.lang)
         pygame.draw.circle(screen, spawn_spec["atmo"], start_px, 8, 2)
-        pygame.draw.line(screen, (235, 242, 255), start_px, cur_px, 2)
-        pygame.draw.circle(screen, (245, 248, 255), cur_px, 4)
+        dx = cur_px[0] - start_px[0]
+        dy = cur_px[1] - start_px[1]
+        if dx * dx + dy * dy > 100:
+            pygame.draw.line(screen, (235, 242, 255), start_px, cur_px, 2)
+            pygame.draw.circle(screen, (245, 248, 255), cur_px, 4)
 
         name = body_label(self.lang, spawn_spec["id"], spawn_spec["name"])
-        lbl = self.small.render(t["slingshot"].format(name=name), True, (240, 246, 255))
+        txt = t["slingshot"].format(name=name)
+        if speed_val is not None:
+            txt = f"{txt}  ·  v={speed_val:.1f}"
+        lbl = self.small.render(txt, True, (240, 246, 255))
         box = pygame.Rect(start_px[0] + 12, start_px[1] - 26, lbl.get_width() + 16, 22)
         screen.blit(self._glass(box.size, (8, 12, 20, 200), (210, 226, 248, 120), 8), box.topleft)
         screen.blit(lbl, (box.x + 8, box.y + 3))
